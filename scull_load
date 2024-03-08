@@ -1,0 +1,38 @@
+#!/bin/sh
+# $Id: scull_load,v 1.4 2004/11/03 06:19:49 rubini Exp $
+module="scull"
+device="scull"
+mode="664"
+
+# 这段代码的目的是确定要为创建的设备节点设置的组所有权。不同的 Linux 发行版在设置设备文件的组所有权时有不同的约定,一些使用 staff 组,另一些使用 wheel 组。这里通过检查 /etc/group 文件来确定应该使用哪个组，且由于此shell脚本只能在root权限下正常运行，故创建的设备文件默认回时root组，这就导致了普通用户无法正常访问，故也同样需要调整用户组
+# grep -q '^staff:' /etc/group 命令用于在 /etc/group 文件中搜索以 staff: 开头的行。-q 选项表示静默模式,不输出匹配的行
+# if ... then ... else ... fi 是一个 shell 脚本中的条件语句结构
+if grep -q '^staff:' /etc/group; then
+    group="staff"
+else
+    group="wheel"
+fi
+
+# invoke insmod with all arguments we got
+# and use a pathname, as insmod doesn't look in . by default
+/sbin/insmod ./$module.ko $* || exit 1
+
+# 这行代码通过读取 /proc/devices 文件并使用 awk 命令,获取与 scull 模块相关联的主设备号
+major=$(awk "\$2==\"$module\" {print \$1}" /proc/devices)
+
+# Remove stale nodes and replace them, then give gid and perms
+# Usually the script is shorter, it's scull that has several devices in it.
+# 这行输出设备名称、主设备号和第一个次设备号 (0) 的信息。
+echo ${device}0 $major  0
+# 这行删除已存在的 /dev/scull[0-3] 设备节点
+rm -f /dev/${device}[0-3]
+# 使用 mknod 命令创建 4 个字符设备节点 /dev/scull[0-3],主设备号为之前获取的值,次设备号从 0 到 3。
+mknod /dev/${device}0 c $major 0
+mknod /dev/${device}1 c $major 1
+mknod /dev/${device}2 c $major 2
+mknod /dev/${device}3 c $major 3
+# 这行创建一个符号链接 /dev/scull,链接到 /dev/scull0。
+ln -sf ${device}0 /dev/${device}
+# 这两行将 /dev/scull[0-3] 设备节点的组所有权设置为之前确定的组,并设置权限模式为之前指定的值 (664)。
+chgrp $group /dev/${device}[0-3] 
+chmod $mode  /dev/${device}[0-3]
